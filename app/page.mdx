@@ -14,3 +14,46 @@ export const metadata = {
 ```bash
 printf "Syntax highlighting works\n"
 ```
+
+<InfoChips items={["Go + Gin + SQLite", "Keploy 3.8.57"]} />
+
+<Callout type="info">MDX components render in the test page.</Callout>
+
+<RecordDiagram />
+
+<ReplayDiagram />
+
+<ExpectActual testName="smoke-test" expected="expected" actual="actual" />
+
+<DoDont
+  dontCommand="rm database.db"
+  dontExplanation="This removes important data."
+  doCommand="restore database.db"
+  doExplanation="This preserves the original schema."
+/>
+
+<TerminalTabs>
+  <TabsList>
+    <TabsTrigger value="terminal-1">Terminal 1</TabsTrigger>
+    <TabsTrigger value="terminal-2">Terminal 2</TabsTrigger>
+  </TabsList>
+  <TabsContent value="terminal-1">
+    <p>Start the service here.</p>
+  </TabsContent>
+  <TabsContent value="terminal-2">
+    <p>Send requests here.</p>
+  </TabsContent>
+</TerminalTabs>
+
+<Troubleshooting>
+  <AccordionItem value="smoke">
+    <AccordionTrigger>Open a troubleshooting item</AccordionTrigger>
+    <AccordionContent>Accordion content works.</AccordionContent>
+  </AccordionItem>
+</Troubleshooting>
+
+<Figure
+  alt="Screenshot placeholder check"
+  caption="A static-safe missing image placeholder."
+  filename="keploy-banner.png"
+/>
