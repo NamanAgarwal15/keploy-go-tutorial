@@ -21,6 +21,7 @@ export function ThemeToggle() {
     return (
       <Button
         aria-label="Change color theme"
+        aria-pressed={false}
         className="size-9"
         size="icon"
         variant="outline"
@@ -35,6 +36,7 @@ export function ThemeToggle() {
   return (
     <Button
       aria-label={`Switch to ${isDark ? "light" : "dark"} theme`}
+      aria-pressed={isDark}
       className="size-9"
       onClick={() => setTheme(isDark ? "light" : "dark")}
       size="icon"
