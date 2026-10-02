@@ -59,6 +59,18 @@ export function useMDXComponents(): MDXComponents {
         {children}
       </p>
     ),
+    table: ({ children, ...props }) => (
+      <div
+        aria-label="Scrollable data table"
+        className="my-5 w-full overflow-x-auto rounded-xl border border-border"
+        role="region"
+        tabIndex={0}
+      >
+        <table className="min-w-[540px] sm:min-w-full" {...props}>
+          {children}
+        </table>
+      </div>
+    ),
     ul: ({ children, ...props }) => (
       <ul
         className="my-4 list-disc space-y-2 pl-6 text-[0.96rem] leading-7 text-muted-foreground marker:text-primary"

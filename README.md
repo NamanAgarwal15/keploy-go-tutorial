@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Zero-Code API Testing with Keploy and Go
 
-## Getting Started
+A single-page beginner tutorial that records real requests against Keploy's
+`book-store-inventory` Go sample and replays them as API tests. It also explains
+why SQLite's persistent auto-increment state can make a first replay fail, and
+how to restore the committed database safely.
 
-First, run the development server:
+## Stack
+
+- Next.js App Router and TypeScript
+- MDX with GFM tables, heading anchors and Shiki code highlighting
+- Tailwind CSS and shadcn/ui components
+- `next-themes` for a system-aware dark/light theme
+- Lucide icons and `next/font` Inter / JetBrains Mono
+
+The tutorial lives in `app/page.mdx`; the app prerenders the root page as static
+HTML. There are no API routes, database connections, analytics or runtime
+content fetches.
+
+## Run locally
+
+Use Node.js 20 or newer. From this directory:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000). To check the production
+build:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run lint
+npm run build
+npm run start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Screenshots
 
-## Learn More
+Put only the matching, genuine screenshots in `public/images/` using the exact
+filenames listed in [public/images/README.md](./public/images/README.md).
+Until then, the tutorial renders accessible placeholders rather than broken
+image links.
 
-To learn more about Next.js, take a look at the following resources:
+## Deploy to Vercel
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Set `GITHUB_REPO_URL` in `lib/site.ts` to the public repository URL.
+2. Create a public GitHub repository and push this project from this directory.
+3. In Vercel, import that repository and keep the detected Next.js framework
+   settings and build defaults.
+4. Deploy. The tutorial is a statically prerendered root page; no environment
+   variables are required.

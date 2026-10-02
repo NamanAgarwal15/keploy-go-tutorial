@@ -1,59 +1,455 @@
 export const metadata = {
   title: "Zero-Code API Testing with Keploy and Go",
-  description: "A beginner tutorial for recording and replaying Go API tests with Keploy.",
+  description:
+    "Record and replay real Go API tests with Keploy, then diagnose the SQLite state-drift gotcha.",
 };
 
 # Zero-Code API Testing with Keploy and Go
 
-## MDX pipeline smoke test
+<p className="mt-4 text-lg leading-8 text-muted-foreground">
+  Turn real API traffic into replayable tests without writing test code by hand
+  — and learn the one state-drift gotcha that trips almost everyone.
+</p>
 
-| Feature | Status |
-| --- | --- |
-| GFM table | Ready |
+<InfoChips
+  items={[
+    "Go + Gin + SQLite",
+    "Keploy 3.8.57",
+    "Ubuntu on WSL2",
+    "Beginner to Keploy",
+    "About 20 minutes",
+  ]}
+/>
 
-```bash
-printf "Syntax highlighting works\n"
-```
+## TL;DR
 
-<InfoChips items={["Go + Gin + SQLite", "Keploy 3.8.57"]} />
+| Move | Command | What happens |
+| --- | --- | --- |
+| Record | `sudo keploy record -c "./book-store-inventory"` | Keploy watches real requests and saves them as YAML tests. |
+| Replay | `sudo keploy test -c "./book-store-inventory"` | Keploy starts the app, replays each request, then compares the response. |
+| Diagnose | Read the diff; the first replay fails because database state drifted. | A persistent SQLite file remembers changes made while recording. |
+| Reset | `git checkout DB/book_inventory.db`, then replay. | Restore the tracked database and replay with a clean starting state. |
 
-<Callout type="info">MDX components render in the test page.</Callout>
+Three runs show why the starting database matters:
+
+| Run | Database state | Passed | Failed | What happened |
+| --- | --- | ---: | ---: | --- |
+| A | Live database mutated by recording | 3 | 5 | The next auto-increment ID was 7 instead of 6, so later requests drifted. |
+| B | Database file deleted with `rm` | 1 | 7 | SQLite made an empty file with no `books` table; requests returned HTTP 500. |
+| C | Database restored with `git checkout` | 8 | 0 | Schema, seed rows and the original ID counter were back in place. |
+
+<Callout type="tip" title="Short on time? Read sections 7 and 8.">
+  Those sections show why a replay can fail even when your code is fine, and
+  why removing the database file is not a safe reset.
+</Callout>
+
+## Why Keploy
+
+Hand-written API tests ask you to maintain request setup, response assertions
+and test helpers for every route. Over time, mocks can drift away from real
+behavior while coverage still misses the paths people actually use. Keploy
+records real requests and responses, saves each pair as YAML, then replays
+those files as tests without changing your Go source.
 
 <RecordDiagram />
 
 <ReplayDiagram />
 
-<ExpectActual testName="smoke-test" expected="expected" actual="actual" />
+| | Hand-written tests | Keploy |
+| --- | --- | --- |
+| Authoring | You write every request, body and assertion. | You exercise the API; Keploy captures it. |
+| Test format | Go code you maintain. | YAML files, one per test case. |
+| Code changes needed | Test files, helpers, sometimes refactors. | None; Keploy wraps your app command. |
+| Time to first test | Minutes to hours per endpoint. | The time to run a few curl commands. |
 
-<DoDont
-  dontCommand="rm database.db"
-  dontExplanation="This removes important data."
-  doCommand="restore database.db"
-  doExplanation="This preserves the original schema."
+## Before you start
+
+You need basic Go knowledge and comfort in a terminal. No testing experience
+is needed: we will record ordinary HTTP requests first, then inspect what
+Keploy generated.
+
+| Requirement | Needed |
+| --- | --- |
+| Go | 1.19 or newer |
+| Operating system | Linux or Ubuntu on WSL2 |
+| Tools | `git` and `curl` |
+| C toolchain | `gcc` and `libc6-dev`; `go-sqlite3` compiles C code. |
+| Docker | Not needed for this sample; SQLite is a file. |
+
+<Callout type="tricky">
+  On WSL, work from your Linux home folder (`~`), not a Windows-mounted path
+  such as `/mnt/c/...`. Start with `cd ~` so file permissions and networking
+  behave as expected.
+</Callout>
+
+## Install Keploy
+
+Run the installer in your Linux shell, then check that the CLI is available:
+
+```bash
+curl --silent -O -L https://keploy.io/install.sh && source install.sh
+keploy --version
+```
+
+<Figure
+  alt="Keploy banner and version line from the guide run"
+  caption="Figure 1. Keploy banner and version line."
+  filename="keploy-banner.png"
 />
 
+<Callout type="surprise">
+  A sign-in step can appear. Run `sudo keploy login` with a browser ready; the
+  one-time code expires in about a minute. Keploy may also offer to update
+  itself: answer `y`, then let the download finish before pressing anything.
+</Callout>
+
+## Set up the sample app
+
+Clone the sample repository, enter the inventory service, download its Go
+modules and build the executable:
+
+```bash
+git clone https://github.com/keploy/samples-go.git
+cd samples-go/book-store-inventory
+go mod download && go build -o book-store-inventory
+```
+
+Building first gives Keploy a concrete command to launch and monitor. The
+sample is a Gin API backed by a SQLite file.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/books/` | List all books. |
+| GET | `/api/v1/book/id/*book_id` | Fetch one book by ID. |
+| GET | `/api/v1/test-private/` | Auxiliary route. |
+| POST | `/api/v1/book/add/` | Add a book. |
+| PATCH | `/api/v1/book/update/` | Update a book. |
+| DELETE | `/api/v1/book/delete/` | Delete a book. |
+
+The committed database starts with these five rows:
+
+| ID | Title | Author | Price | Stock |
+| ---: | --- | --- | ---: | ---: |
+| 1 | The Catcher in the Rye | J.D. Salinger | 749.99 | 10 |
+| 2 | To Kill a Mockingbird | Harper Lee | 929.99 | 15 |
+| 3 | 1984 | George Orwell | 89.99 | 8 |
+| 4 | The Great Gatsby | F. Scott Fitzgerald | 799.99 | 5 |
+| 5 | Moby-Dick | Herman Melville | 899.99 | 12 |
+
+<Callout type="info">
+  Keep this table in mind: it is the clean starting state that the replay
+  expects.
+</Callout>
+
+<Callout type="tricky">
+  If the build complains about `stdlib.h` or `errno.h`, install the C toolchain
+  with `sudo apt install -y gcc libc6-dev`, then build again. A const-qualifier
+  warning from SQLite is harmless.
+</Callout>
+
+<Callout type="tip">
+  The sample repository already contains an authors' `keploy/` folder. Move it
+  aside with `mv keploy keploy-original` so the tests you record here are yours.
+  Its README record command is missing a closing quote; use the command in the
+  next section instead.
+</Callout>
+
+## Record
+
+Start recording in one terminal. Keploy opens its proxy on `:16789`, handles
+DNS through `:26789`, and launches the Go binary as a child process. The API
+will be ready at `http://localhost:9090/api/v1/`.
+
 <TerminalTabs>
-  <TabsList>
+  <TabsList aria-label="Recording terminals">
     <TabsTrigger value="terminal-1">Terminal 1</TabsTrigger>
     <TabsTrigger value="terminal-2">Terminal 2</TabsTrigger>
   </TabsList>
-  <TabsContent value="terminal-1">
-    <p>Start the service here.</p>
+  <TabsContent className="p-4" value="terminal-1">
+    Run Keploy and keep this terminal open while requests are recorded:
+
+    ```bash
+    sudo keploy record -c "./book-store-inventory"
+    ```
   </TabsContent>
-  <TabsContent value="terminal-2">
-    <p>Send requests here.</p>
+  <TabsContent className="p-4" value="terminal-2">
+    Send these four requests to the app running under Keploy.
+
+    **a) POST — add Atomic Habits (the new book gets ID 6):**
+
+    ```bash
+    curl -s -X POST http://localhost:9090/api/v1/book/add/ -H "Content-Type: application/json" -d '{"title":"Atomic Habits","author":"James Clear","price":499.99,"published_date":"2018-10-16T00:00:00Z","stock_quantity":20}'
+    ```
+
+    **b) PATCH — change its stock to 25:**
+
+    ```bash
+    curl -s -X PATCH http://localhost:9090/api/v1/book/update/ -H "Content-Type: application/json" -d '{"book_id":6,"title":"Atomic Habits","author":"James Clear","price":499.99,"published_date":"2018-10-16T00:00:00Z","stock_quantity":25}'
+    ```
+
+    **c) DELETE — remove book 6:**
+
+    ```bash
+    curl -s -X DELETE http://localhost:9090/api/v1/book/delete/ -H "Content-Type: application/json" -d '{"book_id":6}'
+    ```
+
+    **d) GET — list the original five books again:**
+
+    ```bash
+    curl -s http://localhost:9090/api/v1/books/
+    ```
+
+    The list looks untouched, but SQLite's auto-increment state has changed.
   </TabsContent>
 </TerminalTabs>
 
+When the four requests are done, press Ctrl+C in Terminal 1. Keploy has
+captured the baseline and the calls you sent:
+
+```text
+keploy/
+└── test-set-0/
+    └── tests/
+        ├── get-api-v1-books-1.yaml
+        ├── get-api-v1-book-id-by-id-1.yaml
+        ├── post-api-v1-book-add-1.yaml
+        ├── get-api-v1-books-2.yaml
+        ├── patch-api-v1-book-update-1.yaml
+        ├── patch-api-v1-book-update-2.yaml
+        ├── delete-api-v1-book-delete-1.yaml
+        └── get-api-v1-books-3.yaml
+```
+
+There are eight tests rather than four because Keploy also records the
+sample's baseline traffic and a PATCH validation error:
+
+| Test file | What it captured |
+| --- | --- |
+| `get-api-v1-books-1` | Baseline list of five books. |
+| `get-api-v1-book-id-by-id-1` | `GET /api/v1/book/id/3`. |
+| `post-api-v1-book-add-1` | Add a book. |
+| `get-api-v1-books-2` | List containing six books. |
+| `patch-api-v1-book-update-1` | HTTP 400 response; Keploy records errors too. |
+| `patch-api-v1-book-update-2` | Update stock to 25. |
+| `delete-api-v1-book-delete-1` | Delete the added book. |
+| `get-api-v1-books-3` | List returns to five books. |
+
+<Callout type="surprise">
+  There is no `mocks.yaml`: SQLite is a file used inside the app process, not a
+  network call Keploy needs to mock. A `mocksConsumed: 0` replay warning is
+  non-fatal. The database is live and persistent.
+</Callout>
+
+<Callout type="tip">
+  Record from a known state too: run `git checkout DB/book_inventory.db`
+  before recording so the captured responses match a clean database.
+</Callout>
+
+## Replay and the gotcha
+
+Replay the generated set:
+
+```bash
+sudo keploy test -c "./book-store-inventory"
+```
+
+The readiness probe at `/keploy/__readiness_probe__` can return 404; that is
+harmless. This first replay reports 8 tests, 3 passed and 5 failed. The
+failures come from persistent state, not a bug in the Go handlers.
+
+Here is the sequence. Recording inserted book 6, then deleted its row. SQLite
+keeps the highest auto-increment ID it has issued and does not reuse a deleted
+ID. During replay, the same POST therefore creates book 7 instead of book 6:
+
+<ExpectActual
+  actual={'book_id: "7"'}
+  expected={'book_id: "6"'}
+  testName="post-api-v1-book-add-1"
+/>
+
+That first ID mismatch makes later requests target a row that does not exist:
+
+| Test | Recorded expectation | Replay result |
+| --- | --- | --- |
+| `post-api-v1-book-add-1` | New book ID 6. | New book ID 7. |
+| `get-api-v1-books-2` | New entry has ID 6. | New entry has ID 7. |
+| `patch-api-v1-book-update-2` | One row affected. | Zero rows affected. |
+| `delete-api-v1-book-delete-1` | One row affected. | Zero rows affected. |
+| `get-api-v1-books-3` | Original five books. | Six books; the ID 7 book was never removed. |
+
+<Callout type="info">
+  These are response-body mismatches, not status mismatches. PATCH and DELETE
+  still return HTTP 200, but report zero affected rows.
+</Callout>
+
+<Callout type="tricky">
+  Do not edit the expected values or re-record just because Keploy prints
+  “KEPLOY NEXT” suggestions. The test set describes the intended behavior; fix
+  the environment so the same behavior can replay.
+</Callout>
+
+<Figure
+  alt="Replay diff showing the expected book ID 6 and actual book ID 7"
+  caption="Figure 3. State drift changes the new book ID from 6 to 7."
+  filename="replay-failure.png"
+/>
+
+## The tempting fix vs the right fix
+
+<DoDont
+  dontCommand="rm DB/book_inventory.db"
+  dontExplanation="The schema and seed rows live in this committed file, and the app has no code that creates the books table. SQLite silently creates an empty replacement, so the service still starts and prints “DB Connection Eastablished” — the sample's own spelling."
+  doCommand="git checkout DB/book_inventory.db"
+  doExplanation="Restore the tracked file. Its schema, five seed books and auto-increment counter return together, with no Go code changes to hide a regression."
+/>
+
+Deleting the file produces a different failure: 8 tests, 1 passed and 7
+failed. Requests that need the missing table return HTTP 500 with
+`"details": "no such table: books"` and
+`"error": "Failed to add book data"`. The expected status was 200, but the
+actual status is 500. `Content-Length` is 69 instead of 700: a small error
+object replaced the expected book list. One test still passes because the
+recorded PATCH with HTTP 400 is rejected before the app queries the table.
+
+Restore the database file instead:
+
+```bash
+git checkout DB/book_inventory.db
+```
+
+Git replies `Updated 1 path from the index`. The schema and five seed books
+return, and the auto-increment counter resets because it lives in the same
+file. No Go source changes, so the reset does not conceal a code regression.
+
+<Callout type="info">
+  State drift produces plausible-looking responses such as HTTP 200 with the
+  wrong ID. A missing schema produces a loud HTTP 500. Recognizing which kind
+  of failure you have is half the diagnosis.
+</Callout>
+
+<Callout type="tricky">
+  `git checkout DB/book_inventory.db` discards uncommitted changes to that
+  file. Check for local work before restoring it.
+</Callout>
+
+<Callout type="tip">
+  Reset and replay in one step:
+  `git checkout DB/book_inventory.db && sudo keploy test -c "./book-store-inventory"`.
+  Do the same before recording and in CI.
+</Callout>
+
+<Figure
+  alt="Replay response showing HTTP 500 and no such table: books"
+  caption="Figure 7. Deleting the database file leaves no books table."
+  filename="replay-500.png"
+/>
+
+## Green run
+
+Run the same replay command again after restoring the database:
+
+```bash
+sudo keploy test -c "./book-store-inventory"
+```
+
+The verified run completes in about 5.05 s: 8 tests passed, 0 failed,
+`phase verified_green`.
+
+<Callout type="success">
+  You now have a working regression suite: eight real API tests captured from
+  real traffic, with no test code written by hand.
+</Callout>
+
+<Callout type="info">
+  The `mocks.yaml` warning in a green run is non-fatal for the same reason as
+  before: SQLite is a local file, not an external service.
+</Callout>
+
+<Figure
+  alt="Final Keploy replay summary with eight passed and zero failed"
+  caption="Figure 11. Final green replay: 8 passed, 0 failed."
+  filename="green-run.png"
+/>
+
+## Common blockers
+
 <Troubleshooting>
-  <AccordionItem value="smoke">
-    <AccordionTrigger>Open a troubleshooting item</AccordionTrigger>
-    <AccordionContent>Accordion content works.</AccordionContent>
+  <AccordionItem value="id-drift">
+    <AccordionTrigger>Expected book_id 6 but got 7</AccordionTrigger>
+    <AccordionContent>
+      <p><strong>Cause:</strong> The live SQLite auto-increment state drifted after recording.</p>
+      <p><strong>Fix:</strong> Run <code>git checkout DB/book_inventory.db</code>, then replay.</p>
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="missing-table">
+    <AccordionTrigger>HTTP 500 and “no such table: books”</AccordionTrigger>
+    <AccordionContent>
+      <p><strong>Cause:</strong> The database file was deleted and SQLite created an empty replacement.</p>
+      <p><strong>Fix:</strong> Restore it with <code>git checkout DB/book_inventory.db</code>, then replay.</p>
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="login">
+    <AccordionTrigger>Sign-in is stuck or the code expired</AccordionTrigger>
+    <AccordionContent>
+      <p><strong>Cause:</strong> The one-time sign-in code expires quickly.</p>
+      <p><strong>Fix:</strong> Run <code>sudo keploy login</code> with the browser ready and enter a fresh code.</p>
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="headers">
+    <AccordionTrigger>Build error mentions stdlib.h or errno.h</AccordionTrigger>
+    <AccordionContent>
+      <p><strong>Cause:</strong> The C compiler or standard library headers are missing.</p>
+      <p><strong>Fix:</strong> Run <code>sudo apt install -y gcc libc6-dev</code>, then rebuild.</p>
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="mnt-c">
+    <AccordionTrigger>Project paths start with /mnt/c/</AccordionTrigger>
+    <AccordionContent>
+      <p><strong>Cause:</strong> The project is on the Windows-mounted filesystem.</p>
+      <p><strong>Fix:</strong> Move into the Linux home folder with <code>cd ~</code> before cloning.</p>
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="quote">
+    <AccordionTrigger>The sample record command fails to parse</AccordionTrigger>
+    <AccordionContent>
+      <p><strong>Cause:</strong> The sample README command is missing a closing quote.</p>
+      <p><strong>Fix:</strong> Run <code>sudo keploy record -c "./book-store-inventory"</code>.</p>
+    </AccordionContent>
   </AccordionItem>
 </Troubleshooting>
 
-<Figure
-  alt="Screenshot placeholder check"
-  caption="A static-safe missing image placeholder."
-  filename="keploy-banner.png"
-/>
+## Cheat sheet and next steps
+
+Copy this Bash block for the complete loop. Run it from your Linux home folder;
+the reset command belongs inside the sample directory.
+
+```bash
+# Install Keploy and verify the CLI
+curl --silent -O -L https://keploy.io/install.sh && source install.sh
+keploy --version
+
+# Clone and build the Go sample
+git clone https://github.com/keploy/samples-go.git
+cd samples-go/book-store-inventory
+go mod download && go build -o book-store-inventory
+
+# Restore a known database state before recording
+git checkout DB/book_inventory.db
+
+# Record real API traffic
+sudo keploy record -c "./book-store-inventory"
+
+# Replay the generated tests
+sudo keploy test -c "./book-store-inventory"
+
+# Reset the database before the next replay
+git checkout DB/book_inventory.db
+```
+
+Try these next:
+
+1. Record another test set with `--metadata 'name=<descriptive-name>'` so the scenario is easy to recognize.
+2. Run Keploy on every pull request in CI. Restore the database first, commit `tests/` and `config.yaml`, and leave `mocks.yaml` out.
+3. Treat red runs seriously. Decide whether the cause is state, environment or a real regression before changing an expected value.
+
+You are ready to capture the next useful behavior—one clean state at a time.
