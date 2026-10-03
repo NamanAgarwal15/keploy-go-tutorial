@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { GitBranch, Menu } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,10 @@ function SectionLinks({
 }: {
   sections: Section[];
   activeId: string;
-  onNavigate?: () => void;
+  onNavigate?: (
+    sectionId: string,
+    event: MouseEvent<HTMLAnchorElement>,
+  ) => void;
 }) {
   if (sections.length === 0) {
     return (
@@ -45,7 +48,7 @@ function SectionLinks({
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
               href={`#${section.id}`}
-              onClick={onNavigate}
+              onClick={(event) => onNavigate?.(section.id, event)}
             >
               {section.title}
             </a>
@@ -61,7 +64,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [progress, setProgress] = useState(0);
-  const sectionsInitialized = useRef(false);
+  const pendingMobileTarget = useRef<string | null>(null);
 
   useEffect(() => {
     const headings = Array.from(
@@ -72,28 +75,93 @@ export function SiteShell({ children }: { children: ReactNode }) {
       title: heading.innerText.trim(),
     }));
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!sectionsInitialized.current) {
-          sectionsInitialized.current = true;
+    let frame = 0;
+    let sectionsInitialized = false;
+    const updateActiveSection = () => {
+      if (frame !== 0) return;
+
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const header = document.querySelector<HTMLElement>("header");
+        if (!header) return;
+
+        const referenceLine = header.getBoundingClientRect().bottom + 16;
+        document.documentElement.style.setProperty(
+          "--toc-reference-offset",
+          `${referenceLine}px`,
+        );
+
+        if (!sectionsInitialized) {
+          sectionsInitialized = true;
           setSections(pageSections);
         }
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort(
-            (left, right) =>
-              left.boundingClientRect.top - right.boundingClientRect.top,
-          );
-        if (visible[0]?.target instanceof HTMLElement) {
-          setActiveId(visible[0].target.id);
-        }
-      },
-      { rootMargin: "-12% 0px -76% 0px", threshold: 0 },
-    );
 
-    headings.forEach((heading) => observer.observe(heading));
-    return () => observer.disconnect();
+        const remainingScroll =
+          document.documentElement.scrollHeight -
+          window.scrollY -
+          window.innerHeight;
+        const nextActiveId =
+          remainingScroll <= 2
+            ? (headings.at(-1)?.id ?? "")
+            : (headings
+                .toReversed()
+                .find(
+                  (heading) =>
+                    heading.getBoundingClientRect().top <= referenceLine,
+                )?.id ?? "");
+
+        setActiveId((currentId) =>
+          currentId === nextActiveId ? currentId : nextActiveId,
+        );
+      });
+    };
+
+    updateActiveSection();
+    window.addEventListener("scroll", updateActiveSection, { passive: true });
+    window.addEventListener("resize", updateActiveSection);
+    document.addEventListener("load", updateActiveSection, true);
+
+    return () => {
+      if (frame !== 0) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", updateActiveSection);
+      window.removeEventListener("resize", updateActiveSection);
+      document.removeEventListener("load", updateActiveSection, true);
+    };
   }, []);
+
+  useEffect(() => {
+    if (sheetOpen || !pendingMobileTarget.current) return;
+
+    let frame = 0;
+    const scrollToPendingTarget = () => {
+      if (document.querySelector('[role="dialog"]')) return false;
+
+      frame = requestAnimationFrame(() => {
+        const id = pendingMobileTarget.current;
+        const heading = id ? document.getElementById(id) : null;
+        if (!id || !heading) return;
+
+        pendingMobileTarget.current = null;
+        window.history.pushState(null, "", `#${id}`);
+        heading.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      return true;
+    };
+
+    if (scrollToPendingTarget()) {
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const observer = new MutationObserver(() => {
+      if (scrollToPendingTarget()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      if (frame !== 0) cancelAnimationFrame(frame);
+    };
+  }, [sheetOpen]);
 
   useEffect(() => {
     let frame = 0;
@@ -164,7 +232,11 @@ export function SiteShell({ children }: { children: ReactNode }) {
                   <div className="px-4 pb-6">
                     <SectionLinks
                       activeId={activeId}
-                      onNavigate={() => setSheetOpen(false)}
+                      onNavigate={(id, event) => {
+                        event.preventDefault();
+                        pendingMobileTarget.current = id;
+                        setSheetOpen(false);
+                      }}
                       sections={sections}
                     />
                   </div>
