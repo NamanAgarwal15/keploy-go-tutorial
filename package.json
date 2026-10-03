@@ -1,7 +1,11 @@
 {
   "name": "keploy-go-tutorial",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "description": "A beginner-friendly Next.js + MDX tutorial on zero-code API testing with Keploy and Go.",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
