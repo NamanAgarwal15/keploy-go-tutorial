@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { GitBranch, Menu } from "lucide-react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -135,7 +136,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
       <header className="sticky top-0 z-40 border-b border-border/80 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2">
             <div className="lg:hidden">
               <Sheet onOpenChange={setSheetOpen} open={sheetOpen}>
                 <SheetTrigger
@@ -170,8 +171,15 @@ export function SiteShell({ children }: { children: ReactNode }) {
                 </SheetContent>
               </Sheet>
             </div>
+            <Image
+              alt="Keploy"
+              className="h-7 w-auto shrink-0"
+              height={211}
+              src="/images/keploy-logo.png"
+              width={654}
+            />
             <a
-              className="truncate text-sm font-semibold tracking-tight text-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring sm:text-base"
+              className="min-w-0 truncate text-sm font-semibold tracking-tight text-foreground focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring sm:text-base"
               href="#top"
             >
               {SITE_TITLE}
